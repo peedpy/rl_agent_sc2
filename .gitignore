@@ -172,3 +172,25 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+Agents/
+__pycache__/
+action/__pycache__/
+libs/__pycache__/
+algorithms/__pycache__/
+logs/
+Varios/
+Papers/
+Papers/~*.docx
+Papers/~*.tmp
+QLearningTable*
+StatusGameQLearningTable.csv
+QlearningStadisticsTrain.csv
+Analisis/.ipynb_checkpoints
+Datas/
+__pycache__
+Nueva carpeta*
+DQN_NN - q_network*
+test*
+new*
+old*
