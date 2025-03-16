@@ -194,3 +194,4 @@ DQN_NN - q_network*
 test*
 new*
 old*
+.venv*
