@@ -1,8 +1,32 @@
+"""
+Módulo para el control táctico de unidades militares en StarCraft II.
+
+Este módulo implementa la lógica de combate para Marines y Marauders, incluyendo
+estrategias de ataque y defensa basadas en análisis de posiciones enemigas,
+distancias y priorización de objetivos.
+
+Estrategias implementadas:
+- Marines: Efectivos contra unidades a distancia y para ataques rápidos
+- Marauders: Mejores para combate cercano y contra unidades con alta salud
+- Análisis de "hot zones": Identificación de zonas con mayor concentración enemiga
+
+Referencias:
+- https://liquipedia.net/starcraft2/Marine
+- https://liquipedia.net/starcraft2/Marauder
+
+Autor: Pablo Escobar
+Fecha: 2022
+"""
+
+import logging
 from pysc2.lib import actions, features, units
 import random
 import numpy as np # Mathematical functions
 import os
 from collections import Counter
+
+# Configuración del logger para este módulo
+logger = logging.getLogger(__name__)
 
 """
 DEFINICIONES
@@ -35,102 +59,173 @@ Es más eficiente para acabar con unidades que están a punto de ser derrotadas
 """
 
 class AttackArmy:
-  def __init__(self): 
-    self.total_send_units = 0
-    self.marines   = []  #Total de marinos que estan atacando actualmente
-    self.marauders = []
-
-    self.army_positions = None
-    self.structure_positions = None
-
-
-  def send_to_attack_opposite(self, obs, helper, army_label):
-    #-------------------------------------------
-    print("=" * 100)
-    print("CALCULATE HOT ZONE")
-    print("=" * 100)
-
-    army_positions, structure_positions, max_quadrants_index = helper.get_calculate_hot_zone(obs)
-    print(f"***army_positions                           : {army_positions}")
-    print(f"***structure_positions                      : {structure_positions}")
-    print(f"***max_quadrants_index(army/structure)      : {max_quadrants_index}")
-    #print(f"***min_quadrants_index(army/structure)      : {min_quadrants_index}")
-    #os.system("pause")
-
-    unit = None
-    if army_label == 'marine_attack' or army_label == 'marine_defense':
-      unit = units.Terran.Marine
-    elif army_label == 'marauder':
-      unit = units.Terran.Marauder
-
-    army_units = helper.get_my_units_by_type(obs, unit)
-    free_army_units  = [_unit for _unit in army_units if _unit.order_length == 0]
-    enemy_army_units = [_unit for _unit in obs.observation.raw_units if _unit.alliance == features.PlayerRelative.ENEMY]
+    """
+    Clase responsable del control táctico de unidades militares.
     
-    if len(free_army_units) > 0 and len(enemy_army_units) > 0:
-      target_units = []
-      enemy_units_data = []
-      for enemy_unit in enemy_army_units:
-          unit_type = enemy_unit.unit_type
-          enemy_tag = helper.get_terran_unit(unit_type, army_label)
-          
-          if enemy_tag != "Unknown":
-            health = enemy_unit.health
-            position = (enemy_unit.x, enemy_unit.y)
-            enemy_units_data.append(( army_label ,unit_type, enemy_tag, health, position ))
-            target_units.append(enemy_unit)
-
-      print(50*'_')
-      c = 0
-      for data in enemy_units_data:
-        c+=1
-        print("***{} - found data: {}".format(c, data))
-      print(50*'_')
-
-      if not enemy_units_data:
-          return (actions.RAW_FUNCTIONS.no_op(), 0 , (None, None))
-
-      #Por cada unidad libre del ejercito, verifica la distancia con respecto a todas las unidades enemigas
-      # visibles en el rango de vision
-      # Priorizar las unidades enemigas más cercanas con menor cantidad de vida.
-      MIN_DISTANCE = 20
-      MAX_DISTANCE = 20
-      closest_units = []
-      for m in free_army_units:
-        distances = [((m.x - unit.x) ** 2 + (m.y - unit.y) ** 2) ** 0.5 for unit in target_units]
-
-        filtered_units = []
-        if army_label == "marauder" or army_label == "marine_defense":
-          filtered_units = [(unit, distance, unit.health) for unit, distance in zip(target_units, distances) if distance <= MAX_DISTANCE]
-        elif army_label == "marine_attack":
-          filtered_units = [(unit, distance, unit.health) for unit, distance in zip(target_units, distances) if distance >= MIN_DISTANCE]
-
-        # Sort the filtered list of enemy units by distance and health
-        closest_units_sorted = sorted(filtered_units, key=lambda x: (x[1], x[2]))
+    Esta clase implementa estrategias de combate inteligentes para Marines y Marauders,
+    incluyendo análisis de posiciones enemigas, cálculo de distancias óptimas y
+    priorización de objetivos basada en salud y proximidad.
+    
+    Attributes:
+        total_send_units (int): Contador total de unidades enviadas a combate
+        marines (list): Lista de Marines actualmente en combate
+        marauders (list): Lista de Marauders actualmente en combate
+        army_positions (tuple): Posiciones de unidades enemigas de combate
+        structure_positions (tuple): Posiciones de estructuras enemigas
+    """
+    
+    # Constantes de configuración táctica
+    MIN_DISTANCE_ATTACK = 20  # Distancia mínima para ataques con Marines
+    MAX_DISTANCE_DEFENSE = 20  # Distancia máxima para defensa con Marauders
+    
+    def __init__(self): 
+        """
+        Inicializa la clase AttackArmy con contadores y listas de seguimiento.
+        """
+        logger.debug("Inicializando módulo AttackArmy")
         
-        # Print the distances and health of filtered enemy units
-        #print("{} => ({},{}) - Distance to nearby enemy units: ".format(army_label, m.x, m.y, closest_units_sorted))
-        
-        # Select the closest enemy unit with the lowest health
-        if closest_units_sorted:
-            closest_units.append(closest_units_sorted[0])
+        self.total_send_units = 0
+        self.marines = []  # Total de marinos que están atacando actualmente
+        self.marauders = []  # Total de marauders que están atacando actualmente
 
-      #print("closest_units => {}".format(closest_units))
-      # Select the most prioritized enemy unit (the first one in the list)
-      if closest_units:
-        priority_unit = min(closest_units, key=lambda x: (x[1], x[2]))
-        enemy_unit = priority_unit[0]       
-        x, y = enemy_unit.x, enemy_unit.y
-        random_my_unit = random.choice(free_army_units)
-        selected_tag = random_my_unit.tag
-        print("({},{}) -- Posicion a atacar: {}".format( random_my_unit.x, random_my_unit.y , (x,y) ))
+        self.army_positions = None
+        self.structure_positions = None
+
+    def send_to_attack_opposite(self, obs, helper, army_label):
+        """
+        Envía unidades militares a atacar objetivos enemigos.
         
-        #os.system('pause')
-        try:
-          return (actions.RAW_FUNCTIONS.Attack_pt("now", selected_tag, (x, y) ), 1,   (x, y) )
-        except Exception as e:
-          return (actions.RAW_FUNCTIONS.no_op(), 0 , (None, None))
-      else:
-        return (actions.RAW_FUNCTIONS.no_op(), 0 , (None, None))
-    else:
-      return (actions.RAW_FUNCTIONS.no_op(), 0 , (None, None))
+        Esta función implementa la lógica de combate inteligente:
+        1. Analiza las "hot zones" (zonas calientes) del mapa
+        2. Identifica unidades enemigas válidas para atacar
+        3. Calcula distancias y prioriza objetivos
+        4. Selecciona la mejor unidad para el ataque
+        5. Ejecuta la acción de ataque
+        
+        Args:
+            obs: Observación del estado actual del juego
+            helper: Objeto Helper con funciones auxiliares
+            army_label (str): Tipo de ataque ('marine_attack', 'marine_defense', 'marauder')
+            
+        Returns:
+            tuple: (acción, flag_éxito, posición) donde:
+                - acción: Función RAW de PySC2 a ejecutar
+                - flag_éxito: 1 si se puede ejecutar, 0 en caso contrario
+                - posición: Coordenadas del objetivo (x, y) o (None, None)
+                
+        Example:
+            >>> attack = AttackArmy()
+            >>> action, success, pos = attack.send_to_attack_opposite(obs, helper, 'marine_attack')
+            >>> if success:
+            ...     print(f"Atacando objetivo en posición {pos}")
+        """
+        logger.info(f"Iniciando ataque con {army_label}")
+        logger.debug("=" * 80)
+        logger.debug("ANÁLISIS DE ZONAS CALIENTES")
+        logger.debug("=" * 80)
+
+        # Analizar zonas calientes del mapa
+        army_positions, structure_positions, max_quadrants_index = helper.get_calculate_hot_zone(obs)
+        
+        logger.debug(f"Posiciones de ejército enemigo: {len(army_positions)} unidades")
+        logger.debug(f"Posiciones de estructuras enemigas: {len(structure_positions)} estructuras")
+        logger.debug(f"Cuadrantes con mayor concentración (ejército/estructuras): {max_quadrants_index}")
+
+        # Determinar tipo de unidad a usar
+        unit = None
+        if army_label in ['marine_attack', 'marine_defense']:
+            unit = units.Terran.Marine
+            logger.debug("Usando Marines para el ataque")
+        elif army_label == 'marauder':
+            unit = units.Terran.Marauder
+            logger.debug("Usando Marauders para el ataque")
+        else:
+            logger.warning(f"Tipo de ejército no reconocido: {army_label}")
+            return (actions.RAW_FUNCTIONS.no_op(), 0, (None, None))
+
+        # Obtener unidades disponibles
+        army_units = helper.get_my_units_by_type(obs, unit)
+        free_army_units = [_unit for _unit in army_units if _unit.order_length == 0]
+        enemy_army_units = [_unit for _unit in obs.observation.raw_units if _unit.alliance == features.PlayerRelative.ENEMY]
+        
+        logger.debug(f"Unidades {army_label} disponibles: {len(free_army_units)}")
+        logger.debug(f"Unidades enemigas detectadas: {len(enemy_army_units)}")
+        
+        if not free_army_units or not enemy_army_units:
+            logger.debug("No hay unidades disponibles para ataque o no hay enemigos detectados")
+            return (actions.RAW_FUNCTIONS.no_op(), 0, (None, None))
+
+        # Filtrar unidades enemigas válidas
+        target_units = []
+        enemy_units_data = []
+        
+        for enemy_unit in enemy_army_units:
+            unit_type = enemy_unit.unit_type
+            enemy_tag = helper.get_terran_unit(unit_type, army_label)
+            
+            if enemy_tag != "Unknown":
+                health = enemy_unit.health
+                position = (enemy_unit.x, enemy_unit.y)
+                enemy_units_data.append((army_label, unit_type, enemy_tag, health, position))
+                target_units.append(enemy_unit)
+
+        logger.debug(f"Unidades enemigas válidas para ataque: {len(enemy_units_data)}")
+        
+        if not enemy_units_data:
+            logger.debug("No se encontraron unidades enemigas válidas para atacar")
+            return (actions.RAW_FUNCTIONS.no_op(), 0, (None, None))
+
+        # Mostrar información detallada de unidades enemigas
+        logger.debug("Detalles de unidades enemigas:")
+        for i, data in enumerate(enemy_units_data, 1):
+            logger.debug(f"  {i}. Tipo: {data[2]}, Salud: {data[3]}, Posición: {data[4]}")
+
+        # Calcular distancias y priorizar objetivos
+        closest_units = []
+        for my_unit in free_army_units:
+            distances = [((my_unit.x - unit.x) ** 2 + (my_unit.y - unit.y) ** 2) ** 0.5 for unit in target_units]
+
+            # Filtrar unidades según la estrategia
+            filtered_units = []
+            if army_label in ["marauder", "marine_defense"]:
+                # Para Marauders y defensa: atacar unidades cercanas
+                filtered_units = [(unit, distance, unit.health) for unit, distance in zip(target_units, distances) 
+                                 if distance <= self.MAX_DISTANCE_DEFENSE]
+            elif army_label == "marine_attack":
+                # Para ataque con Marines: atacar unidades a distancia
+                filtered_units = [(unit, distance, unit.health) for unit, distance in zip(target_units, distances) 
+                                 if distance >= self.MIN_DISTANCE_ATTACK]
+
+            # Ordenar por distancia y salud (priorizar cercanos con poca salud)
+            closest_units_sorted = sorted(filtered_units, key=lambda x: (x[1], x[2]))
+            
+            if closest_units_sorted:
+                closest_units.append(closest_units_sorted[0])
+
+        logger.debug(f"Unidades candidatas para ataque: {len(closest_units)}")
+
+        # Seleccionar el objetivo prioritario
+        if closest_units:
+            priority_unit = min(closest_units, key=lambda x: (x[1], x[2]))
+            enemy_unit = priority_unit[0]
+            distance = priority_unit[1]
+            health = priority_unit[2]
+            
+            x, y = enemy_unit.x, enemy_unit.y
+            random_my_unit = random.choice(free_army_units)
+            selected_tag = random_my_unit.tag
+            
+            logger.info(f"Atacando con {army_label} desde ({random_my_unit.x}, {random_my_unit.y}) a objetivo en ({x}, {y})")
+            logger.debug(f"Distancia al objetivo: {distance:.2f}, Salud del objetivo: {health}")
+            
+            # Ejecutar ataque
+            try:
+                action = actions.RAW_FUNCTIONS.Attack_pt("now", selected_tag, (x, y))
+                return (action, 1, (x, y))
+                
+            except Exception as e:
+                logger.error(f"Error al ejecutar ataque: {str(e)}")
+                return (actions.RAW_FUNCTIONS.no_op(), 0, (None, None))
+        else:
+            logger.debug("No se encontraron objetivos válidos para el ataque")
+            return (actions.RAW_FUNCTIONS.no_op(), 0, (None, None))

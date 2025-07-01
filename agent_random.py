@@ -1,16 +1,16 @@
 """
-Agente Q-Learning para StarCraft II con PySC2.
+Agente Aleatorio para StarCraft II con PySC2.
 
-Este módulo implementa un agente de aprendizaje por refuerzo basado en Q-Learning
-para jugar StarCraft II, incluyendo:
-- Gestión de estados y observaciones del juego
-- Selección de acciones usando Q-Learning
-- Cálculo y propagación de recompensas
-- Persistencia de datos de entrenamiento
-- Estadísticas y métricas de rendimiento
+Este módulo implementa un agente que selecciona acciones de forma aleatoria
+para jugar StarCraft II, sirviendo como línea base (baseline) para comparar
+el rendimiento del agente Q-Learning. Incluye:
+- Selección aleatoria de acciones
+- Cálculo de recompensas para análisis
+- Persistencia de estadísticas de rendimiento
+- Métricas de comparación con otros agentes
 
-El agente aprende a través de múltiples episodios, mejorando su estrategia
-basándose en las recompensas recibidas y la experiencia acumulada.
+Este agente es útil para establecer un punto de referencia y evaluar
+la efectividad del aprendizaje por refuerzo.
 
 Referencias:
 - https://github.com/deepmind/pysc2
@@ -33,7 +33,7 @@ import random
 import chardet
 
 # Configuración del logger para este módulo
-logger = get_logger('agent_qlearning')
+logger = get_logger('agent_random')
 
 # Variables globales para manejo de acciones múltiples
 multiActions = []
@@ -55,13 +55,11 @@ def executeActions():
         logger.debug("No hay acciones pendientes")
         return False
 
-# Tabla Q global que mantiene el estado de aprendizaje
+# Tabla Q global (no se usa para aprendizaje, solo para compatibilidad)
 qtable = None
 
-# Hiperparámetros del algoritmo Q-Learning
-EXPLORATION_MAX = 1.0      # Valor máximo de exploración
-EXPLORATION_MIN = 0.1      # Valor mínimo de exploración
-EXPLORATION_DECAY = 0.0003 # Factor de decaimiento de exploración
+# Semilla para reproducibilidad
+random.seed(42)
 
 # Diccionario que mapea cada acción a su índice en self.totals
 ACTION_TO_INDEX = {
@@ -82,20 +80,19 @@ ACTION_TO_INDEX = {
     'do_nothing': 14
 }
 
-class AgentQlearning(TerranAgent):
+class AgentRandom(TerranAgent):
     """
-    Agente de aprendizaje por refuerzo basado en Q-Learning para StarCraft II.
+    Agente aleatorio para StarCraft II como línea base de comparación.
     
-    Esta clase implementa un agente que aprende a jugar StarCraft II usando
-    el algoritmo Q-Learning, combinando exploración y explotación para
-    desarrollar estrategias efectivas.
+    Esta clase implementa un agente que selecciona acciones de forma completamente
+    aleatoria, sin ningún aprendizaje. Sirve como punto de referencia para
+    evaluar la efectividad del agente Q-Learning.
     
     Attributes:
-        epsilon (float): Probabilidad de exploración actual
+        epsilon (float): No se usa en este agente (siempre 0)
         episodes (int): Número de episodios completados
         step_mul (int): Multiplicador de pasos del juego
         total_game_time (int): Tiempo total de juego acumulado
-        train_mode (bool): True si está en modo entrenamiento
         policies (list): Lista de políticas/acciones disponibles
         total_policies (int): Número total de políticas
         reward_function (Reward): Función de cálculo de recompensas
@@ -103,22 +100,21 @@ class AgentQlearning(TerranAgent):
         totals (list): Contador de acciones ejecutadas por tipo
     """
     
-    def __init__(self, step_mul, train_mode=True):
+    def __init__(self, step_mul):
         """
-        Inicializa el agente Q-Learning.
+        Inicializa el agente aleatorio.
         
         Args:
             step_mul (int): Multiplicador de pasos del juego
-            train_mode (bool): True para modo entrenamiento, False para evaluación
             
         Example:
-            >>> agent = AgentQlearning(step_mul=8, train_mode=True)
+            >>> agent = AgentRandom(step_mul=8)
         """
-        super(AgentQlearning, self).__init__()
+        super(AgentRandom, self).__init__()
         
-        logger.info("Inicializando agente Q-Learning")
+        logger.info("Inicializando agente aleatorio")
         
-        # Hiperparámetros
+        # Hiperparámetros (no se usan para selección aleatoria)
         self.epsilon = 0
         self.episodes = 0
         self.step_mul = step_mul
@@ -129,16 +125,12 @@ class AgentQlearning(TerranAgent):
         self.prev_gas = 0
         self.prev_supply = 0
         
-        # Configuración de modo
-        self.train_mode = train_mode
-        logger.info(f"Modo de entrenamiento: {self.train_mode}")
-        
         # Definición de políticas (acciones)
         self.policies = self.get_all_policies()
         self.total_policies = len(self.policies)
         logger.info(f"Políticas disponibles: {self.total_policies}")
         
-        # Sistema de recompensas
+        # Sistema de recompensas (para análisis)
         self.reward_actions = 0
         self.execute_action = None
         self.instant_action = ''
@@ -158,21 +150,21 @@ class AgentQlearning(TerranAgent):
         self.count_explotation = 0
         self.reward_final = 0
         
-        # Acumulador de recompensas del episodio
+        # Acumulador de recompensas del episodio (para análisis)
         self.episode_rewards = []
         
-        # Inicializar tabla Q global
+        # Inicializar tabla Q global (no se usa para aprendizaje)
         global qtable
         qtable = QLearningTable(self.policies, self.total_policies)
         
         # Cargar estadísticas de entrenamiento previo
-        self.data_stats_train, last_episodes, self.new_name_file = self.check_file_stats_game(agent_name='qlearning')
+        self.data_stats_train, last_episodes, self.new_name_file = self.check_file_stats_game(agent_name='random')
         self.episodes = last_episodes
         
         # Iniciar nuevo juego
         self.new_game()
         
-        logger.info("Agente Q-Learning inicializado correctamente")
+        logger.info("Agente aleatorio inicializado correctamente")
 
     def get_encoding_and_separator(self, name_file):
         """
@@ -234,7 +226,7 @@ class AgentQlearning(TerranAgent):
             logger.debug(f"Archivo CSV no encontrado: {name_file}")
             return False, ''
 
-    def check_file_stats_game(self, agent_name='qlearning'):
+    def check_file_stats_game(self, agent_name='random'):
         """
         Verifica y carga estadísticas de entrenamiento previo.
         
@@ -288,15 +280,14 @@ class AgentQlearning(TerranAgent):
         
         return data_stats_train, last_episodes, name_file
 
-    def update_final_reward_and_retrain(self, obs, final_state):
+    def update_final_reward(self, obs):
         """
-        Actualiza la recompensa final y reentrena el agente con los datos del episodio.
+        Actualiza la recompensa final del episodio.
         
         Args:
             obs: Observación final del juego
-            final_state (str): Estado final del episodio
         """
-        logger.info("Actualizando recompensa final y reentrenando agente")
+        logger.info("Actualizando recompensa final del episodio")
         
         # Extraer información de unidades
         raw_units = obs.observation.raw_units
@@ -308,15 +299,15 @@ class AgentQlearning(TerranAgent):
         # Inicializar recompensa final y constantes
         self.reward_final = 0
         c = 0.1
-        r_win = 50
-        r_loss = -10
+        r_win = 100
+        r_loss = -50
 
         # Calcular recompensa final según resultado del juego
         if obs.reward == 1:
-            logger.info("¡Victoria! Recompensa: +50")
+            logger.info("¡Victoria! Recompensa: +100")
             self.reward_final = r_win
         elif obs.reward == -1:
-            logger.info("Derrota. Penalización: -10")
+            logger.info("Derrota. Penalización: -50")
             self.reward_final = r_loss
         elif obs.reward == 0:
             logger.info("Empate. Calculando recompensa basada en unidades")
@@ -332,28 +323,9 @@ class AgentQlearning(TerranAgent):
         logger.info(f"Recompensa final calculada: {self.reward_final}")
         self.total_rewards_by_episode += self.reward_final
 
-        # Agregar información del episodio para reentrenamiento
-        self.episode_rewards.append((
-            self.previous_state, 
-            self.previous_policy,
-            self.reward_final,
-            final_state
-        ))
-
-        # Aprender con la recompensa final
-        qtable.learn(
-            self.previous_state, 
-            self.previous_policy, 
-            self.reward_final,
-            final_state
-        )
-
-        # Propagar recompensas hacia atrás
-        qtable.propagate_rewards(self.episode_rewards, self.reward_final)
-
     def get_state(self, obs):
         """
-        Extrae y normaliza el estado del juego para el algoritmo Q-Learning.
+        Extrae y normaliza el estado del juego (para compatibilidad).
         
         Args:
             obs: Observación del estado actual del juego
@@ -361,11 +333,11 @@ class AgentQlearning(TerranAgent):
         Returns:
             tuple: Estado normalizado con 14 características del juego
             
-        Example:
-            >>> state = agent.get_state(obs)
-            >>> print(f"Estado: {state}")
+        Note:
+            Este método se mantiene para compatibilidad, aunque el agente
+            aleatorio no usa el estado para tomar decisiones.
         """
-        logger.debug("Extrayendo estado del juego")
+        logger.debug("Extrayendo estado del juego (agente aleatorio)")
         
         # Obtener unidades propias
         scvs = self.helpers.get_my_units_by_type(obs, units.Terran.SCV)
@@ -443,7 +415,7 @@ class AgentQlearning(TerranAgent):
 
     def step(self, obs):    
         """
-        Ejecuta un paso del agente en el juego.
+        Ejecuta un paso del agente aleatorio en el juego.
         
         Args:
             obs: Observación del estado actual del juego
@@ -451,16 +423,16 @@ class AgentQlearning(TerranAgent):
         Returns:
             action: Acción a ejecutar en el juego
         """
-        super(AgentQlearning, self).step(obs)
+        super(AgentRandom, self).step(obs)
         
-        # Obtener nuevo estado
+        # Obtener nuevo estado (para compatibilidad)
         state = str(self.get_state(obs))
         logger.info('=' * 100)
         logger.info(f'Estado actual: {state}')
         
-        # Manejar final de episodio en modo entrenamiento
-        if self.train_mode and obs.last():
-            self.update_final_reward_and_retrain(obs, 'terminal')
+        # Manejar final de episodio
+        if obs.last():
+            self.update_final_reward(obs)
         
         # Ejecutar acciones múltiples si hay pendientes
         global multiActions
@@ -477,70 +449,36 @@ class AgentQlearning(TerranAgent):
             else:
                 self.totals[15] += 1  # Contador de fallos
 
-            # Calcular recompensa en modo entrenamiento
-            if self.train_mode:
-                reward_actions = self.reward_function.get_specific_reward(
-                    instant_action, execute_action, obs
-                )
+            # Calcular recompensa (para análisis)
+            reward_actions = self.reward_function.get_specific_reward(
+                instant_action, execute_action, obs
+            )
 
-                self.total_rewards_by_policy += reward_actions
-                self.total_rewards_by_episode += reward_actions
+            self.total_rewards_by_policy += reward_actions
+            self.total_rewards_by_episode += reward_actions
 
-                logger.info(f"Recompensa instantánea: {reward_actions}")
-                logger.info(f"Total recompensas por política: {self.total_rewards_by_policy}")
-            
+            logger.info(f"Recompensa instantánea: {reward_actions}")
+            logger.info(f"Total recompensas por política: {self.total_rewards_by_policy}")
+
             return specify_action
         else:
-            # Seleccionar nueva acción
-            if self.train_mode:
-                # Actualizar Q-table con política previa
-                next_state = 'terminal' if obs.last() else state
-
-                # Agregar información del episodio para actualización posterior
-                if self.previous_policy is not None:
-                    self.episode_rewards.append((
-                        self.previous_state, 
-                        self.previous_policy, 
-                        self.total_rewards_by_policy,
-                        next_state
-                    ))
-
-                    qtable.learn(
-                        self.previous_state,
-                        self.previous_policy,
-                        self.total_rewards_by_policy,
-                        next_state
-                    )
-
-                # Actualizar epsilon usando decaimiento exponencial
-                self.epsilon = qtable.exponential_decay(self.episodes, EXPLORATION_DECAY, EXPLORATION_MAX)
-                self.epsilon = max(EXPLORATION_MIN, self.epsilon)
-                logger.info(f"Epsilon seleccionado: {self.epsilon}")
-            
+            # Seleccionar nueva acción de forma aleatoria
             # Actualizar tiempo total de juego
             game_time = int(obs.observation["game_loop"] / (16 * self.step_mul))
             self.total_game_time += game_time
 
-            # Seleccionar acción según política
-            policy_selected, random_action = qtable.choose_action(
-                state, self.epsilon, game_time, self.train_mode
-            )
+            # Selección completamente aleatoria (sin aprendizaje)
+            policy_selected = random.randint(0, 13)
+            logger.debug(f"Política aleatoria seleccionada: {policy_selected}")
 
-            # Actualizar contadores de exploración/explotación
-            if random_action:
-                self.count_exploration += 1
-            else:
-                self.count_explotation += 1
-
-            # Obtener política específica
-            key, policy_select = self.get_specific_policy(-1, policy_selected)
+            key, policy_select = self.get_specific_policy(policy_selected, '')
             
             if policy_select is not None:  
                 multiActions = policy_select
                 self.total_actions_by_policy = len(multiActions)
-                logger.info(f'Política seleccionada: {policy_select}')
+                logger.info(f'Política aleatoria seleccionada: {policy_select}')
             
-            # Actualizar estado anterior
+            # Actualizar estado anterior (para compatibilidad)
             self.previous_state = state
             self.previous_policy = policy_selected
             self.total_rewards_by_policy = 0
@@ -551,19 +489,18 @@ class AgentQlearning(TerranAgent):
         """
         Reinicia el agente al final de un episodio.
         
-        Guarda estadísticas, actualiza la tabla Q y prepara el agente
-        para el siguiente episodio.
+        Guarda estadísticas y prepara el agente para el siguiente episodio.
         """
-        logger.info("Reiniciando agente al final del episodio")
+        logger.info("Reiniciando agente aleatorio al final del episodio")
         
         self.finish = datetime.datetime.now()
         difference_time = (self.finish - self.start).total_seconds()
 
-        super(AgentQlearning, self).reset()
+        super(AgentRandom, self).reset()
 
-        # Guardar tabla Q
+        # Guardar tabla Q (para compatibilidad)
         qtable.count += 1
-        qtable.q_table.to_csv('new_qlearning_table_train.csv', mode='w')
+        qtable.q_table.to_csv('new_random_table_train.csv', mode='w')
         
         # Crear nueva fila de estadísticas
         new_row = {
@@ -603,7 +540,7 @@ class AgentQlearning(TerranAgent):
         }
         
         # Guardar estadísticas
-        name_file = 'new_qlearning_stats_train.csv'
+        name_file = 'new_random_stats_train.csv'
         self.data_stats_train = self.data_stats_train.append(new_row, ignore_index=True)
         self.data_stats_train.to_csv(name_file, mode='w')
 
@@ -617,7 +554,7 @@ class AgentQlearning(TerranAgent):
         Reinicia todas las variables de estado y contadores
         necesarios para comenzar un nuevo episodio.
         """
-        logger.info("Iniciando nuevo juego/episodio")
+        logger.info("Iniciando nuevo juego/episodio (agente aleatorio)")
         
         # Reiniciar contadores
         self.count_exploration = 0
@@ -641,6 +578,5 @@ class AgentQlearning(TerranAgent):
         # Reiniciar posiciones utilizadas
         self.helpers.initialize_used_positions()
         
-        logger.info("Nuevo juego inicializado correctamente")
-
+        logger.info("Nuevo juego inicializado correctamente (agente aleatorio)")
   
